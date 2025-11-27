@@ -13,6 +13,12 @@
     import CommonHelper from "@/utils/CommonHelper";
     import { slide } from "svelte/transition";
 
+    const emailProviderOptions = [
+        { label: "None (local sendmail)", value: "" },
+        { label: "SMTP", value: "smtp" },
+        { label: "Resend", value: "resend" },
+    ];
+
     const tlsOptions = [
         { label: "Auto (StartTLS)", value: false },
         { label: "Always", value: true },
@@ -30,7 +36,8 @@
     let formSettings = {};
     let isLoading = false;
     let isSaving = false;
-    let maskPassword = false;
+    let maskSmtpPassword = false;
+    let maskResendApiKey = false;
     let showMoreOptions = false;
 
     $: initialHash = JSON.stringify(originalFormSettings);
@@ -60,7 +67,12 @@
         isSaving = true;
 
         try {
-            const settings = await ApiClient.settings.update(CommonHelper.filterRedactedProps(formSettings));
+            // Sync the enabled flags based on emailProvider selection
+            const settingsToSave = CommonHelper.filterRedactedProps(formSettings);
+            settingsToSave.smtp.enabled = settingsToSave.emailProvider === "smtp";
+            settingsToSave.resend.enabled = settingsToSave.emailProvider === "resend";
+
+            const settings = await ApiClient.settings.update(settingsToSave);
             init(settings);
             setErrors({});
             addSuccessToast("Successfully saved mail settings.");
@@ -75,7 +87,20 @@
         formSettings = {
             meta: settings?.meta || {},
             smtp: settings?.smtp || {},
+            resend: settings?.resend || {},
+            emailProvider: settings?.emailProvider || "",
         };
+
+        // Backward compatibility: if smtp.enabled is true but emailProvider is empty,
+        // set emailProvider to "smtp"
+        if (formSettings.smtp.enabled && !formSettings.emailProvider) {
+            formSettings.emailProvider = "smtp";
+        }
+
+        // Similarly for resend
+        if (formSettings.resend?.enabled && !formSettings.emailProvider) {
+            formSettings.emailProvider = "resend";
+        }
 
         if (!formSettings.smtp.authMethod) {
             formSettings.smtp.authMethod = authMethods[0].value;
@@ -83,11 +108,17 @@
 
         originalFormSettings = JSON.parse(JSON.stringify(formSettings));
 
-        maskPassword = !!formSettings.smtp.username;
+        maskSmtpPassword = !!formSettings.smtp.username;
+        // Use enabled/emailProvider as indicator since apiKey is masked (returned empty) from API
+        maskResendApiKey = formSettings.emailProvider === "resend" || !!formSettings.resend?.enabled;
     }
 
     function reset() {
         formSettings = JSON.parse(JSON.stringify(originalFormSettings || {}));
+        // Restore mask state for sensitive fields
+        maskSmtpPassword = !!originalFormSettings.smtp?.username;
+        maskResendApiKey =
+            originalFormSettings.emailProvider === "resend" || !!originalFormSettings.resend?.enabled;
     }
 </script>
 
@@ -136,21 +167,25 @@
                     </div>
                 </div>
 
-                <Field class="form-field form-field-toggle m-b-sm" let:uniqueId>
-                    <input type="checkbox" id={uniqueId} required bind:checked={formSettings.smtp.enabled} />
+                <Field class="form-field m-b-base" name="emailProvider" let:uniqueId>
                     <label for={uniqueId}>
-                        <span class="txt">Use SMTP mail server <strong>(recommended)</strong></span>
+                        <span class="txt">Email provider</span>
                         <i
                             class="ri-information-line link-hint"
                             use:tooltip={{
-                                text: 'By default PocketBase uses the unix "sendmail" command for sending emails. For better emails deliverability it is recommended to use a SMTP mail server.',
+                                text: 'By default PocketBase uses the unix "sendmail" command for sending emails. For better deliverability, use SMTP or Resend.',
                                 position: "top",
                             }}
                         />
                     </label>
+                    <ObjectSelect
+                        id={uniqueId}
+                        items={emailProviderOptions}
+                        bind:keyOfSelected={formSettings.emailProvider}
+                    />
                 </Field>
 
-                {#if formSettings.smtp.enabled}
+                {#if formSettings.emailProvider === "smtp"}
                     <div transition:slide={{ duration: 150 }}>
                         <div class="grid">
                             <div class="col-lg-4">
@@ -190,7 +225,7 @@
                                     <label for={uniqueId}>Password</label>
                                     <RedactedPasswordInput
                                         id={uniqueId}
-                                        bind:mask={maskPassword}
+                                        bind:mask={maskSmtpPassword}
                                         bind:value={formSettings.smtp.password}
                                     />
                                 </Field>
@@ -261,7 +296,33 @@
                     </div>
                 {/if}
 
-                <div class="flex">
+                {#if formSettings.emailProvider === "resend"}
+                    <div transition:slide={{ duration: 150 }}>
+                        <div class="grid">
+                            <div class="col-lg-6">
+                                <Field class="form-field required" name="resend.apiKey" let:uniqueId>
+                                    <label for={uniqueId}>
+                                        <span class="txt">Resend API Key</span>
+                                        <i
+                                            class="ri-information-line link-hint"
+                                            use:tooltip={{
+                                                text: "You can get your API key from resend.com/api-keys",
+                                                position: "top",
+                                            }}
+                                        />
+                                    </label>
+                                    <RedactedPasswordInput
+                                        id={uniqueId}
+                                        bind:mask={maskResendApiKey}
+                                        bind:value={formSettings.resend.apiKey}
+                                    />
+                                </Field>
+                            </div>
+                        </div>
+                    </div>
+                {/if}
+
+                <div class="flex m-t-base">
                     <div class="flex-fill" />
 
                     {#if hasChanges}

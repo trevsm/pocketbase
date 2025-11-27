@@ -119,15 +119,24 @@ var (
 	_ DBExporter    = (*Settings)(nil)
 )
 
+// Email provider constants
+const (
+	EmailProviderNone   = ""
+	EmailProviderSMTP   = "smtp"
+	EmailProviderResend = "resend"
+)
+
 type settings struct {
-	SMTP         SMTPConfig         `form:"smtp" json:"smtp"`
-	Backups      BackupsConfig      `form:"backups" json:"backups"`
-	S3           S3Config           `form:"s3" json:"s3"`
-	Meta         MetaConfig         `form:"meta" json:"meta"`
-	RateLimits   RateLimitsConfig   `form:"rateLimits" json:"rateLimits"`
-	TrustedProxy TrustedProxyConfig `form:"trustedProxy" json:"trustedProxy"`
-	Batch        BatchConfig        `form:"batch" json:"batch"`
-	Logs         LogsConfig         `form:"logs" json:"logs"`
+	SMTP          SMTPConfig         `form:"smtp" json:"smtp"`
+	Resend        ResendConfig       `form:"resend" json:"resend"`
+	EmailProvider string             `form:"emailProvider" json:"emailProvider"`
+	Backups       BackupsConfig      `form:"backups" json:"backups"`
+	S3            S3Config           `form:"s3" json:"s3"`
+	Meta          MetaConfig         `form:"meta" json:"meta"`
+	RateLimits    RateLimitsConfig   `form:"rateLimits" json:"rateLimits"`
+	TrustedProxy  TrustedProxyConfig `form:"trustedProxy" json:"trustedProxy"`
+	Batch         BatchConfig        `form:"batch" json:"batch"`
+	Logs          LogsConfig         `form:"logs" json:"logs"`
 }
 
 // Settings defines the PocketBase app settings.
@@ -153,6 +162,7 @@ func newDefaultSettings() *Settings {
 				MaxDays: 5,
 				LogIP:   true,
 			},
+			EmailProvider: EmailProviderNone,
 			SMTP: SMTPConfig{
 				Enabled:  false,
 				Host:     "smtp.example.com",
@@ -160,6 +170,10 @@ func newDefaultSettings() *Settings {
 				Username: "",
 				Password: "",
 				TLS:      false,
+			},
+			Resend: ResendConfig{
+				Enabled: false,
+				APIKey:  "",
 			},
 			Backups: BackupsConfig{
 				CronMaxKeep: 3,
@@ -281,7 +295,9 @@ func (s *Settings) PostValidate(ctx context.Context, app App) error {
 	return validation.ValidateStructWithContext(ctx, s,
 		validation.Field(&s.Meta),
 		validation.Field(&s.Logs),
+		validation.Field(&s.EmailProvider, validation.In(EmailProviderNone, EmailProviderSMTP, EmailProviderResend)),
 		validation.Field(&s.SMTP),
+		validation.Field(&s.Resend),
 		validation.Field(&s.S3),
 		validation.Field(&s.Backups),
 		validation.Field(&s.Batch),
@@ -321,7 +337,7 @@ func (s *Settings) Clone() (*Settings, error) {
 
 // MarshalJSON implements the [json.Marshaler] interface.
 //
-// Note that sensitive fields (S3 secret, SMTP password, etc.) are excluded.
+// Note that sensitive fields (S3 secret, SMTP password, Resend API key, etc.) are excluded.
 func (s *Settings) MarshalJSON() ([]byte, error) {
 	s.mu.RLock()
 	copy := s.settings
@@ -331,6 +347,7 @@ func (s *Settings) MarshalJSON() ([]byte, error) {
 		&copy.SMTP.Password,
 		&copy.S3.Secret,
 		&copy.Backups.S3.Secret,
+		&copy.Resend.APIKey,
 	}
 
 	// mask all sensitive fields
@@ -389,6 +406,23 @@ func (c SMTPConfig) Validate() error {
 			validation.In(mailer.SMTPAuthLogin, mailer.SMTPAuthPlain),
 		),
 		validation.Field(&c.LocalName, is.Host),
+	)
+}
+
+// -------------------------------------------------------------------
+
+type ResendConfig struct {
+	Enabled bool   `form:"enabled" json:"enabled"`
+	APIKey  string `form:"apiKey" json:"apiKey,omitempty"`
+}
+
+// Validate makes ResendConfig validatable by implementing [validation.Validatable] interface.
+func (c ResendConfig) Validate() error {
+	return validation.ValidateStruct(&c,
+		validation.Field(
+			&c.APIKey,
+			validation.When(c.Enabled, validation.Required),
+		),
 	)
 }
 

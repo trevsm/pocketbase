@@ -614,13 +614,19 @@ func (app *BaseApp) SubscriptionsBroker() *subscriptions.Broker {
 	return app.subscriptionsBroker
 }
 
-// NewMailClient creates and returns a new SMTP or Sendmail client
+// NewMailClient creates and returns a new mail client (SMTP, Resend, or Sendmail)
 // based on the current app settings.
 func (app *BaseApp) NewMailClient() mailer.Mailer {
 	var client mailer.Mailer
 
-	// init mailer client
-	if app.Settings().SMTP.Enabled {
+	// init mailer client based on the selected email provider
+	// (also check SMTP.Enabled for backward compatibility)
+	switch {
+	case app.Settings().EmailProvider == EmailProviderResend || app.Settings().Resend.Enabled:
+		client = &mailer.ResendClient{
+			APIKey: app.Settings().Resend.APIKey,
+		}
+	case app.Settings().EmailProvider == EmailProviderSMTP || app.Settings().SMTP.Enabled:
 		client = &mailer.SMTPClient{
 			Host:       app.Settings().SMTP.Host,
 			Port:       app.Settings().SMTP.Port,
@@ -630,7 +636,7 @@ func (app *BaseApp) NewMailClient() mailer.Mailer {
 			AuthMethod: app.Settings().SMTP.AuthMethod,
 			LocalName:  app.Settings().SMTP.LocalName,
 		}
-	} else {
+	default:
 		client = &mailer.Sendmail{}
 	}
 
